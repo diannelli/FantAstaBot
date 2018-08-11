@@ -1,90 +1,98 @@
-from telegram.ext import Updater, CommandHandler, MessageHandler, RegexHandler
-from telegram.ext import ConversationHandler, CallbackQueryHandler, Filters
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
-import logging
-import logging.config
+from telegram import ReplyKeyboardMarkup
+from telegram.ext import ConversationHandler
+from telegram.ext import Updater, CommandHandler
 
-MAKE_OFFERS, READ_OFFERS = range(2)
+from config import logging as log
 
-
-def set_logging():
-    '''Logging configuration with a YAML format configuration file.
-    flogger writes on logs/bet_bot.log file
-    and RotatingFileHandler allows to rollover file
-    at a predetermined size (maxBytes)'''
-
-    flogger = get_flogger()
-    return flogger
-
-
-def get_flogger():
-    '''Returns a flogger instance'''
-    flogger = logging.getLogger('flogger')
-    return flogger
-
+SET_TASK, MAKE_OFFERS, CONSULT_OFFERS = range(3)
 
 def start(bot, update):
     """
     Start function. Displayed whenever the /start command is called.
-    This function sets the language of the bot.
+    Start menu function.
+    This will display the initial options.
     """
-    # Create buttons to slect language:
     keyboard = [['FAI OFFERTA', 'CONSULTA OFFERTE']]
-
-    # Create initial message:
-    message = "Hey, I'm FantAstaBot"
 
     reply_markup = ReplyKeyboardMarkup(keyboard,
                                        one_time_keyboard=True,
                                        resize_keyboard=True)
-    update.message.reply_text(message, reply_markup=reply_markup)
+    update.message.reply_text(reply_markup=reply_markup)
+    return SET_TASK
 
-    return SET_LANG
+def main_menu(bot, update):
 
-
-def set_lang(bot, update):
-    """
-    First handler with received data to set language globally.
-    """
-    # Set language:
-    global LANG
-    LANG = update.message.text
     user = update.message.from_user
+    if update.message.text == 'FAI OFFERTA':
+        return MAKE_OFFERS
+    if update.message.text == 'CONSULTA OFFERTE':
+        return CONSULT_OFFERS
 
-    # logger.info("Language set by {} to {}.".format(user.first_name, LANG))
-    update.message.reply_text(lang_selected[LANG],
-                            reply_markup=ReplyKeyboardRemove())
+def make_offers(bot, update):
+    """
+    Start function. Displayed whenever the /start command is called.
+    Start menu function.
+    This will display the initial options.
+    """
+    keyboard = [['Ruolo', 'squadra']]
 
-    return MENU
+    reply_markup = ReplyKeyboardMarkup(keyboard,
+                                       one_time_keyboard=True,
+                                       resize_keyboard=True)
+    update.message.reply_text(reply_markup=reply_markup)
+    return
 
 
-f = open('token.txt', 'r')
-updater = Updater(token=f.readline())
-f.close()
+def consult_offers(bot, update):
+    """
+    Start function. Displayed whenever the /start command is called.
+    Start menu function.
+    This will display the initial options.
+    """
+    keyboard = [['sto cazzo', 'sto cazzo 2']]
 
-# Get the dispatcher to register handlers:
-dp = updater.dispatcher
+    reply_markup = ReplyKeyboardMarkup(keyboard,
+                                       one_time_keyboard=True,
+                                       resize_keyboard=True)
+    update.message.reply_text(reply_markup=reply_markup)
+    return
 
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler('start', start)],
+def main():
+    f = open('token.txt', 'r')
+    updater = Updater(token=f.readline())
+    f.close()
 
-    states={
-        SET_LANG: [CommandHandler('set_lang', set_lang)]
-    },
+    # Get the dispatcher to register handlers:
+    dp = updater.dispatcher
 
-    fallbacks=[CommandHandler('cancel', set_lang),
-               CommandHandler('help', help)]
-)
+    # Add conversation handler with predefined states:
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler('start', start)],
 
-dp.add_handler(conv_handler)
+        states={
+            SET_TASK : [CommandHandler('main_menu', main_menu)],
 
-# Log all errors:
-# dp.add_error_handler(error)
+            MAKE_OFFERS: [CommandHandler('make_offers', make_offers)],
 
-# Start DisAtBot:
-updater.start_polling()
+            CONSULT_OFFERS: [CommandHandler('make_offers', consult_offers)]
+        },
 
-# Run the bot until the user presses Ctrl-C or the process
-# receives SIGINT, SIGTERM or SIGABRT:
-updater.idle()
+        fallbacks=[CommandHandler('help', help)]
+    )
+
+    dp.add_handler(conv_handler)
+
+    # Log all errors:
+    # dp.add_error_handler(error)
+    logger = log.set_logging()
+
+    # Start DisAtBot:
+    updater.start_polling()
+
+    # Run the bot until the user presses Ctrl-C or the process
+    # receives SIGINT, SIGTERM or SIGABRT:
+    updater.idle()
+
+
+if __name__ == '__main__':
+    main()
