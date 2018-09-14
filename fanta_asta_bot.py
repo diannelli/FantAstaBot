@@ -6,6 +6,7 @@ from config import logging as log
 
 SET_TASK, MAKE_OFFERS, CONSULT_OFFERS = range(3)
 
+
 def start(bot, update):
     """
     Start function. Displayed whenever the /start command is called.
@@ -20,6 +21,7 @@ def start(bot, update):
     update.message.reply_text(reply_markup=reply_markup)
     return SET_TASK
 
+
 def main_menu(bot, update):
 
     user = update.message.from_user
@@ -27,6 +29,7 @@ def main_menu(bot, update):
         return MAKE_OFFERS
     if update.message.text == 'CONSULTA OFFERTE':
         return CONSULT_OFFERS
+
 
 def make_offers(bot, update):
     """
@@ -56,6 +59,7 @@ def consult_offers(bot, update):
                                        resize_keyboard=True)
     update.message.reply_text(reply_markup=reply_markup)
     return
+
 
 def main():
     f = open('token.txt', 'r')
