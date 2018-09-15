@@ -1,10 +1,11 @@
 import pandas as pd
 import os
+from datetime import datetime
 import db_functions as dbf
+import extra_functions as ef
 from telegram import ReplyKeyboardMarkup
 from telegram.ext import ConversationHandler
 from telegram.ext import Updater, CommandHandler
-
 from config import logging as log
 
 SET_TASK, MAKE_OFFERS, CONSULT_OFFERS = range(3)
@@ -13,6 +14,8 @@ f = open('token.txt', 'r')
 updater = Updater(token=f.readline())
 f.close()
 dispatcher = updater.dispatcher
+
+all_pl = dbf.db_select(table='players', dataframe=True)
 
 
 def start(bot, update):
@@ -69,6 +72,123 @@ def consult_offers(bot, update):
     return
 
 
+def offro(bot, update, args):
+
+    message = 'Formato errato. Es: /offro 5, padoin, cag.'
+    user = select_user(bot, update)
+
+    if not args:
+        return bot.send_message(chat_id=update.message.chat_id,
+                                text='Inserire giocatore e prezzo.')
+
+    args = ''.join(args).split(',')
+
+    if len(args) != 3:
+        return bot.send_message(chat_id=update.message.chat_id,
+                                text=message)
+    else:
+        offer, pl, team = args
+        try:
+            offer = int(offer)
+        except ValueError:
+            return bot.send_message(chat_id=update.message.chat_id,
+                                    text=message)
+
+        try:
+            pl = int(pl)
+            return bot.send_message(chat_id=update.message.chat_id,
+                                    text=message)
+        except ValueError:
+            pass
+
+        try:
+            team = int(team)
+            return bot.send_message(chat_id=update.message.chat_id,
+                                    text=message)
+        except ValueError:
+            pass
+
+        temp = all_pl[all_pl['player_team'] == team.upper()]
+        pl = ef.jaccard_player(pl, temp['player_name'].values)
+        team, roles, price = all_pl[all_pl['player_name'] == pl][
+            all_pl.columns[2:-1]].values[0]
+
+        dbf.db_insert(
+                table='offers',
+                columns=['offer_user', 'offer_player', 'offer_price'],
+                values=[user, pl, offer])
+
+        return bot.send_message(chat_id=update.message.chat_id,
+                                text='{}   ({})   {}'.format(pl, team, roles) +
+                                '\n\n/conferma                /annulla')
+
+
+def conferma(bot, update):
+
+    user = select_user(bot, update)
+
+    try:
+        of_id, pl = dbf.db_select(
+            table='offers',
+            columns_in=['offer_id', 'offer_player'],
+            where='offer_user = "{}" AND offer_datetime IS NULL'.
+            format(user))[0]
+    except IndexError:
+        return bot.send_message(chat_id=update.message.chat_id,
+                                text='Non ci sono offerte da confermare ' +
+                                'per {}'.format(user))
+
+    status = all_pl[all_pl['player_name'] == pl].iloc[0]['player_status']
+    if status != 'FREE':
+        return bot.send_message(chat_id=update.message.chat_id,
+                                text='Giocatore non svincolato ({}).'.
+                                format(status))
+
+    offer = dbf.db_select(
+            table='offers',
+            columns_in=['offer_price'],
+            where='offer_id = {}'.format(of_id))[0]
+
+    price = all_pl[all_pl['player_name'] == pl].iloc[0]['player_price']
+    if offer < price:
+        return bot.send_message(chat_id=update.message.chat_id,
+                                text='Offerta troppo bassa. ' +
+                                     'Quotazione: {}'.format(price))
+    else:
+        pl_id = all_pl[all_pl['player_name'] == pl].iloc[0]['player_id']
+        dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        dbf.db_update(
+                table='offers',
+                columns=['offer_player_id', 'offer_datetime', 'offer_status'],
+                values=[pl_id, dt, 'Open'],
+                where='offer_id = {}'.format(of_id))
+
+
+def riepilogo(bot, update):
+
+    offers = dbf.db_select(
+            table='offers',
+            columns_in=['offer_user', 'offer_player',
+                        'offer_price', 'offer_datetime'],
+            where='offer_status = "Open"')
+
+    return
+
+
+def select_user(bot, update):
+
+    try:
+        user = dbf.db_select(
+                table='teams',
+                columns_in=['team_name'],
+                where='team_member = "{}"'.format(
+                        update.message.from_user.first_name))[0]
+        return user
+
+    except IndexError:
+        return False
+
+
 # def main():
 #     f = open('token.txt', 'r')
 #     updater = Updater(token=f.readline())
@@ -108,6 +228,15 @@ def consult_offers(bot, update):
 
 # if __name__ == '__main__':
 #     main()
+
+
+conferma_handler = CommandHandler('conferma', conferma)
+offro_handler = CommandHandler('offro', offro, pass_args=True)
+riepilogo_handler = CommandHandler('riepilogo', riepilogo)
+
+dispatcher.add_handler(conferma_handler)
+dispatcher.add_handler(offro_handler)
+dispatcher.add_handler(riepilogo_handler)
 
 updater.start_polling()
 updater.idle()

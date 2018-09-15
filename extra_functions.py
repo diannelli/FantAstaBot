@@ -24,7 +24,8 @@ def jaccard_player(input_player, all_players):
 	jac_player = ''
 
 	for pl in all_players:
-		trit = set(ngrams(pl, 3))
+		p = pl.replace(' ', '')
+		trit = set(ngrams(p, 3))
 		jd = jaccard_distance(tri_guess, trit)
 		if not jd:
 			return pl
