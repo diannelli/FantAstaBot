@@ -1,3 +1,6 @@
+import pandas as pd
+import os
+import db_functions as dbf
 from telegram import ReplyKeyboardMarkup
 from telegram.ext import ConversationHandler
 from telegram.ext import Updater, CommandHandler
@@ -5,6 +8,11 @@ from telegram.ext import Updater, CommandHandler
 from config import logging as log
 
 SET_TASK, MAKE_OFFERS, CONSULT_OFFERS = range(3)
+
+f = open('token.txt', 'r')
+updater = Updater(token=f.readline())
+f.close()
+dispatcher = updater.dispatcher
 
 
 def start(bot, update):
@@ -61,42 +69,45 @@ def consult_offers(bot, update):
     return
 
 
-def main():
-    f = open('token.txt', 'r')
-    updater = Updater(token=f.readline())
-    f.close()
+# def main():
+#     f = open('token.txt', 'r')
+#     updater = Updater(token=f.readline())
+#     f.close()
+#
+#     # Get the dispatcher to register handlers:
+#     dp = updater.dispatcher
+#
+#     # Add conversation handler with predefined states:
+#     conv_handler = ConversationHandler(
+#         entry_points=[CommandHandler('start', start)],
+#
+#         states={
+#             SET_TASK : [CommandHandler('main_menu', main_menu)],
+#
+#             MAKE_OFFERS: [CommandHandler('make_offers', make_offers)],
+#
+#             CONSULT_OFFERS: [CommandHandler('make_offers', consult_offers)]
+#         },
+#
+#         fallbacks=[CommandHandler('help', help)]
+#     )
+#
+#     dp.add_handler(conv_handler)
+#
+#     # Log all errors:
+#     # dp.add_error_handler(error)
+#     logger = log.set_logging()
+#
+#     # Start DisAtBot:
+#     updater.start_polling()
+#
+#     # Run the bot until the user presses Ctrl-C or the process
+#     # receives SIGINT, SIGTERM or SIGABRT:
+#     updater.idle()
 
-    # Get the dispatcher to register handlers:
-    dp = updater.dispatcher
 
-    # Add conversation handler with predefined states:
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+# if __name__ == '__main__':
+#     main()
 
-        states={
-            SET_TASK : [CommandHandler('main_menu', main_menu)],
-
-            MAKE_OFFERS: [CommandHandler('make_offers', make_offers)],
-
-            CONSULT_OFFERS: [CommandHandler('make_offers', consult_offers)]
-        },
-
-        fallbacks=[CommandHandler('help', help)]
-    )
-
-    dp.add_handler(conv_handler)
-
-    # Log all errors:
-    # dp.add_error_handler(error)
-    logger = log.set_logging()
-
-    # Start DisAtBot:
-    updater.start_polling()
-
-    # Run the bot until the user presses Ctrl-C or the process
-    # receives SIGINT, SIGTERM or SIGABRT:
-    updater.idle()
-
-
-if __name__ == '__main__':
-    main()
+updater.start_polling()
+updater.idle()
