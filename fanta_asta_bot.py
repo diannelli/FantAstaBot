@@ -72,71 +72,149 @@ def consult_offers(bot, update):
     return
 
 
-def offro(bot, update, args):
+def check_not_conf_offers_by_user(user):
+
+    try:
+        old_pl, old_offer = dbf.db_select(
+                table='offers',
+                columns_in=['offer_player', 'offer_price'],
+                where='offer_user = "{}" '.format(user) +
+                      'AND offer_status IS NULL')[0]
+
+        team, roles = all_pl[all_pl['player_name'] == old_pl][
+            all_pl.columns[2:4]].values[0]
+
+        return ("{}, hai ancora un'offerta".format(user) +
+                " in sospeso:\n\n\t\t" +
+                "{}, {}    ({})    {}".format(old_offer, old_pl, team, roles) +
+                "\n\n/conferma                /annulla")
+
+    except IndexError:
+        return False
+
+
+def check_offer_format(args):
 
     message = 'Formato errato. Es: /offro 5, padoin, cag.'
-    user = select_user(bot, update)
 
     if not args:
-        return bot.send_message(chat_id=update.message.chat_id,
-                                text='Inserire giocatore e prezzo.')
+        return 'Inserire giocatore e prezzo.'
 
     args = ''.join(args).split(',')
 
     if len(args) != 3:
-        return bot.send_message(chat_id=update.message.chat_id,
-                                text=message)
+        return message
     else:
         offer, pl, team = args
         try:
-            offer = int(offer)
+            int(offer)
         except ValueError:
-            return bot.send_message(chat_id=update.message.chat_id,
-                                    text=message)
+            return message
 
         try:
-            pl = int(pl)
-            return bot.send_message(chat_id=update.message.chat_id,
-                                    text=message)
+            int(pl)
+            return message
         except ValueError:
             pass
 
         try:
-            team = int(team)
-            return bot.send_message(chat_id=update.message.chat_id,
-                                    text=message)
+            int(team)
+            return message
         except ValueError:
             pass
 
-        temp = all_pl[all_pl['player_team'] == team.upper()]
-        pl = ef.jaccard_player(pl, temp['player_name'].values)
-        team, roles, price = all_pl[all_pl['player_name'] == pl][
-            all_pl.columns[2:-1]].values[0]
+        return offer, pl, team
 
-        dbf.db_insert(
+
+def check_offer_to_confirm(user):
+
+    try:
+        of_id, pl = dbf.db_select(
                 table='offers',
-                columns=['offer_user', 'offer_player', 'offer_price'],
-                values=[user, pl, offer])
+                columns_in=['offer_id', 'offer_player'],
+                where='offer_user = "{}" AND offer_datetime IS NULL'.
+                      format(user))[0]
 
-        return bot.send_message(chat_id=update.message.chat_id,
-                                text='{}   ({})   {}'.format(pl, team, roles) +
-                                '\n\n/conferma                /annulla')
+        return of_id, pl
+
+    except IndexError:
+        return 'Nulla da confermare per {}'.format(user)
+
+
+def check_offer_value(offer_id, player):
+
+    offer = dbf.db_select(
+            table='offers',
+            columns_in=['offer_price'],
+            where='offer_id = {}'.format(offer_id))[0]
+
+    price = all_pl[all_pl['player_name'] == player].iloc[0]['player_price']
+
+    try:
+        last_id, last_user, last_offer, last_dt = dbf.db_select(
+                table='offers',
+                columns_in=['offer_id', 'offer_user',
+                            'offer_price', 'offer_datetime'],
+                where='offer_player = "{}" AND '.format(player) +
+                      'offer_status = "Winning"')[0]
+    except IndexError:
+        last_offer = 0
+        last_user = ''
+        last_id = 0
+
+    if offer < last_offer:
+        dbf.db_delete(table='offers', where='offer_id = {}'.format(offer_id))
+        return ('Offerta troppo bassa. ' +
+                'Ultimo rilancio: {}, {}'.format(last_offer, last_user))
+
+    elif offer < price:
+        dbf.db_delete(table='offers', where='offer_id = {}'.format(offer_id))
+        return 'Offerta troppo bassa. Quotazione: {}'.format(price)
+
+    else:
+        return last_id
+
+
+def offro(bot, update, args):
+
+    user = select_user(bot, update)
+
+    try:
+        offer, pl, team = check_offer_format(args)
+    except ValueError:
+        message = check_offer_format(args)
+        return bot.send_message(chat_id=update.message.chat_id, text=message)
+
+    message = check_not_conf_offers_by_user(user)
+    if message:
+        return bot.send_message(chat_id=update.message.chat_id, text=message)
+
+    temp = all_pl[all_pl['player_team'] == team.upper()]['player_name'].values
+    pl = ef.jaccard_player(pl, temp)
+    team, roles, price = all_pl[all_pl['player_name'] == pl][
+        all_pl.columns[2:-1]].values[0]
+
+    dbf.db_insert(
+            table='offers',
+            columns=['offer_user', 'offer_player', 'offer_price'],
+            values=[user, pl, offer])
+
+    return bot.send_message(chat_id=update.message.chat_id,
+                            text='{} offre {} per:\n\n\t\t'.format(user,
+                                                                   offer) +
+                                 '{}   ({})   {}'.format(pl, team, roles) +
+                            '\n\n/conferma                /annulla')
 
 
 def conferma(bot, update):
 
     user = select_user(bot, update)
+    dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     try:
-        of_id, pl = dbf.db_select(
-            table='offers',
-            columns_in=['offer_id', 'offer_player'],
-            where='offer_user = "{}" AND offer_datetime IS NULL'.
-            format(user))[0]
-    except IndexError:
-        return bot.send_message(chat_id=update.message.chat_id,
-                                text='Non ci sono offerte da confermare ' +
-                                'per {}'.format(user))
+        of_id, pl = check_offer_to_confirm(user)
+    except ValueError:
+        return check_offer_to_confirm(user)
 
     status = all_pl[all_pl['player_name'] == pl].iloc[0]['player_status']
     if status != 'FREE':
@@ -144,24 +222,23 @@ def conferma(bot, update):
                                 text='Giocatore non svincolato ({}).'.
                                 format(status))
 
-    offer = dbf.db_select(
-            table='offers',
-            columns_in=['offer_price'],
-            where='offer_id = {}'.format(of_id))[0]
-
-    price = all_pl[all_pl['player_name'] == pl].iloc[0]['player_price']
-    if offer < price:
+    last_valid_offer = check_offer_value(of_id, pl)
+    if type(last_valid_offer) == str:
         return bot.send_message(chat_id=update.message.chat_id,
-                                text='Offerta troppo bassa. ' +
-                                     'Quotazione: {}'.format(price))
-    else:
-        pl_id = all_pl[all_pl['player_name'] == pl].iloc[0]['player_id']
-        dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        dbf.db_update(
-                table='offers',
-                columns=['offer_player_id', 'offer_datetime', 'offer_status'],
-                values=[pl_id, dt, 'Open'],
-                where='offer_id = {}'.format(of_id))
+                                text=last_valid_offer)
+
+    pl_id = all_pl[all_pl['player_name'] == pl].iloc[0]['player_id']
+    dbf.db_update(
+            table='offers',
+            columns=['offer_player_id', 'offer_datetime', 'offer_status'],
+            values=[pl_id, dt, 'Winning'],
+            where='offer_id = {}'.format(of_id))
+
+    dbf.db_update(
+            table='offers',
+            columns=['offer_status'],
+            values=['Lost'],
+            where='offer_id = {}'.format(last_valid_offer))
 
 
 def riepilogo(bot, update):
@@ -170,7 +247,7 @@ def riepilogo(bot, update):
             table='offers',
             columns_in=['offer_user', 'offer_player',
                         'offer_price', 'offer_datetime'],
-            where='offer_status = "Open"')
+            where='offer_status = "Winning"')
 
     return
 
