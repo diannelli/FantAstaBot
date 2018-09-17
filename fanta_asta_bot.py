@@ -1,14 +1,9 @@
-import pandas as pd
-import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import db_functions as dbf
 import extra_functions as ef
-from telegram import ReplyKeyboardMarkup
-from telegram.ext import ConversationHandler
 from telegram.ext import Updater, CommandHandler
 from config import logging as log
 
-SET_TASK, MAKE_OFFERS, CONSULT_OFFERS = range(3)
 
 f = open('token.txt', 'r')
 updater = Updater(token=f.readline())
@@ -20,78 +15,39 @@ all_pl = dbf.db_select(table='players', dataframe=True)
 
 def start(bot, update):
 
-	"""
-	Start function. Displayed whenever the /start command is called.
-	Start menu function.
-	This will display the initial options.
-	"""
-	keyboard = [['FAI OFFERTA', 'CONSULTA OFFERTE']]
-
-	reply_markup = ReplyKeyboardMarkup(keyboard,
-									   one_time_keyboard=True,
-									   resize_keyboard=True)
-	update.message.reply_text(reply_markup=reply_markup)
-	return SET_TASK
+	bot.send_message(chat_id=update.message.chat_id, text="Iannelli suca")
 
 
-def main_menu(bot, update):
-
-	user = update.message.from_user
-	if update.message.text == 'FAI OFFERTA':
-		return MAKE_OFFERS
-	if update.message.text == 'CONSULTA OFFERTE':
-		return CONSULT_OFFERS
-
-
-def make_offers(bot, update):
-	"""
-	Start function. Displayed whenever the /start command is called.
-	Start menu function.
-	This will display the initial options.
-	"""
-	keyboard = [['Ruolo', 'squadra']]
-
-	reply_markup = ReplyKeyboardMarkup(keyboard,
-									   one_time_keyboard=True,
-									   resize_keyboard=True)
-	update.message.reply_text(reply_markup=reply_markup)
-	return
-
-
-def consult_offers(bot, update):
-	"""
-	Start function. Displayed whenever the /start command is called.
-	Start menu function.
-	This will display the initial options.
-	"""
-	keyboard = [['sto cazzo', 'sto cazzo 2']]
-
-	reply_markup = ReplyKeyboardMarkup(keyboard,
-									   one_time_keyboard=True,
-									   resize_keyboard=True)
-	update.message.reply_text(reply_markup=reply_markup)
-	return
-
-
-def check_not_conf_offers_by_user(user):
+def delete_not_conf_offers_by_user(user):
 
 	try:
-		old_pl, old_offer = dbf.db_select(
+		old_id = dbf.db_select(
 				table='offers',
-				columns_in=['offer_player', 'offer_price'],
+				columns_in=['offer_id'],
 				where='offer_user = "{}" '.format(user) +
 					  'AND offer_status IS NULL')[0]
 
-		team, roles = all_pl[all_pl['player_name'] == old_pl][
-			all_pl.columns[2:4]].values[0]
-
-		return ("{}, hai ancora un'offerta".format(user) +
-				" in sospeso:\n\n\t\t" +
-				"{}, {}    ({})    {}".format(old_offer, old_pl, team, roles) +
-				"\n\n/conferma                /annulla")
+		dbf.db_delete(table='offers', where='offer_id = {}'.format(old_id))
 
 	except IndexError:
-		return False
+		pass
+
+
+def delete_not_conf_offers_by_others(player_id, user):
+
+	try:
+		old_ids = dbf.db_select(
+				table='offers',
+				columns_in=['offer_id'],
+				where='offer_player_id = {} '.format(player_id) +
+					  'AND offer_status IS NULL AND ' +
+					  'offer_user != "{}"'.format(user))
+
+		for old_id in old_ids:
+			dbf.db_delete(table='offers', where='offer_id = {}'.format(old_id))
+
+	except IndexError:
+		pass
 
 
 def check_offer_format(args):
@@ -149,7 +105,7 @@ def too_late_to_offer(time_now, time_before):
 
 	diff = time_now - time_before
 
-	if diff.days:
+	if diff.days > 0:
 		return True
 	else:
 		return False
@@ -183,7 +139,7 @@ def check_offer_value(offer_id, player, dt):
 		dbf.db_update(
 				table='offers',
 				columns=['offer_status'],
-				values=['Won'],
+				values=['Not Official'],
 				where='offer_id = {}'.format(last_id))
 
 		dbf.db_update(
@@ -210,7 +166,7 @@ def check_offer_value(offer_id, player, dt):
 
 def offro(bot, update, args):
 
-	user = select_user(bot, update)
+	user = select_user(update)
 
 	try:
 		offer, pl, team = check_offer_format(args)
@@ -218,39 +174,47 @@ def offro(bot, update, args):
 		message = check_offer_format(args)
 		return bot.send_message(chat_id=update.message.chat_id, text=message)
 
-	message = check_not_conf_offers_by_user(user)
-	if message:
-		return bot.send_message(chat_id=update.message.chat_id, text=message)
+	delete_not_conf_offers_by_user(user)
 
 	temp = all_pl[all_pl['player_team'] == team.upper()]['player_name'].values
+	if not len(temp):
+		return bot.send_message(chat_id=update.message.chat_id,
+		                        text='Squadra inesistente')
+
 	pl = ef.jaccard_player(pl, temp)
+	pl_id = all_pl[all_pl['player_name'] == pl].iloc[0]['player_id']
 	team, roles, price = all_pl[all_pl['player_name'] == pl][
 		all_pl.columns[2:-1]].values[0]
 
 	dbf.db_insert(
 			table='offers',
-			columns=['offer_user', 'offer_player', 'offer_price'],
-			values=[user, pl, offer])
+			columns=['offer_user', 'offer_player', 'offer_player_id',
+			         'offer_price'],
+			values=[user, pl, pl_id, offer])
 
-	return bot.send_message(chat_id=update.message.chat_id,
-							text='{} offre {} per:\n\n\t\t'.format(user,
-																   offer) +
-								 '{}   ({})   {}'.format(pl, team, roles) +
-							'\n\n/conferma                /annulla')
+	return bot.send_message(parse_mode='HTML',
+	                        chat_id=update.message.chat_id,
+							text='<i>{}</i> offre <b>{}</b> per:\n\n\t\t'.
+							format(user, offer) +
+							     '<b>{}   ({})   {}</b>'.
+							format(pl, team, roles) +
+							'\n\n/conferma')
 
 
 def conferma(bot, update):
 
-	user = select_user(bot, update)
+	user = select_user(update)
 	dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 	try:
 		of_id, pl = check_offer_to_confirm(user)
 	except ValueError:
-		return check_offer_to_confirm(user)
+		return bot.send_message(chat_id=update.message.chat_id,
+								text=check_offer_to_confirm(user))
 
 	status = all_pl[all_pl['player_name'] == pl].iloc[0]['player_status']
 	if status != 'FREE':
+		dbf.db_delete(table='offers', where='offer_id = {}'.format(of_id))
 		return bot.send_message(chat_id=update.message.chat_id,
 								text='Giocatore non svincolato ({}).'.
 								format(status))
@@ -261,10 +225,13 @@ def conferma(bot, update):
 								text=last_valid_offer)
 
 	pl_id = all_pl[all_pl['player_name'] == pl].iloc[0]['player_id']
+
+	delete_not_conf_offers_by_others(pl_id, user)
+
 	dbf.db_update(
 			table='offers',
-			columns=['offer_player_id', 'offer_datetime', 'offer_status'],
-			values=[pl_id, dt, 'Winning'],
+			columns=['offer_datetime', 'offer_status'],
+			values=[dt, 'Winning'],
 			where='offer_id = {}'.format(of_id))
 
 	dbf.db_update(
@@ -273,19 +240,88 @@ def conferma(bot, update):
 			values=['Lost'],
 			where='offer_id = {}'.format(last_valid_offer))
 
+	crea_riepilogo(bot, update, dt)
 
-def riepilogo(bot, update):
 
-	offers = dbf.db_select(
+def crea_riepilogo(bot, update, dt_now):
+
+	dt_now = datetime.strptime(dt_now, '%Y-%m-%d %H:%M:%S')
+	message1 = 'Aste APERTE, Tempo Rimanente:\n'
+	message2 = 'Aste CONCLUSE, NON Ufficializzate:\n'
+
+	offers_win = dbf.db_select(
 			table='offers',
-			columns_in=['offer_user', 'offer_player',
+			columns_in=['offer_id', 'offer_user', 'offer_player',
 						'offer_price', 'offer_datetime'],
 			where='offer_status = "Winning"')
 
-	return
+	offers_no = dbf.db_select(
+			table='offers',
+			columns_in=['offer_id', 'offer_user', 'offer_player',
+			            'offer_price', 'offer_datetime'],
+			where='offer_status = "Not Official"')
+
+	for of_id, tm, pl, pr, dt in offers_win:
+		dt2 = datetime.strptime(dt, '%Y-%m-%d %H:%M:%S')
+		diff = dt_now - dt2
+		if diff.days > 0:
+			offers_no.append((of_id, tm, pl, pr, dt))
+			dbf.db_update(
+					table='offers',
+					columns=['offer_status'],
+					values=['Not Official'],
+					where='offer_id = {}'.format(of_id))
+
+	offers_win = [(el[0], el[1], el[2], el[3],
+	               datetime.strptime(el[4], '%Y-%m-%d %H:%M:%S')) for el in
+	              offers_win if el not in offers_no]
+
+	offers_no = [(el[0], el[1], el[2], el[3],
+	              datetime.strptime(el[4], '%Y-%m-%d %H:%M:%S')) for el in
+	             offers_no]
+
+	for _, tm, pl, pr, dt in offers_win:
+		team, roles = dbf.db_select(
+				table='players',
+				columns_in=['player_team', 'player_roles'],
+				where='player_name = "{}"'.format(pl))[0]
+		dt_plus_one = dt + timedelta(days=1)
+		diff = (dt_plus_one - dt_now).total_seconds()
+		hh = diff // 3600
+		mm = (diff % 3600) // 60
+
+		message1 += ('\n\t\t- <b>{}</b> ({}) {}:'.format(pl, team, roles) +
+		             ' {}, <i>{}</i>  '.format(pr, tm) +
+					 ' <b>{}h:{}m</b>'.format(int(hh), int(mm)))
+
+	for _, tm, pl, pr, dt in offers_no:
+		team, roles = dbf.db_select(
+				table='players',
+				columns_in=['player_team', 'player_roles'],
+				where='player_name = "{}"'.format(pl))[0]
+		dt_plus_two = dt + timedelta(days=2)
+		diff = (dt_plus_two - dt_now).total_seconds()
+		hh = diff // 3600
+		mm = (diff % 3600) // 60
+
+		message2 += ('\n\t\t- <b>{}</b> ({}) {}:'.format(pl, team, roles) +
+		             ' {}, <i>{}</i>  '.format(pr, tm) +
+					 ' <b>{}h:{}m</b>'.format(int(hh), int(mm)))
+
+	bot.send_message(parse_mode='HTML', chat_id=update.message.chat_id,
+	                 text=message1)
+	return bot.send_message(parse_mode='HTML', chat_id=update.message.chat_id,
+	                        text=message2)
 
 
-def select_user(bot, update):
+def riepilogo(bot, update):
+
+	dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+	return crea_riepilogo(bot, update, dt)
+
+
+def select_user(update):
 
 	try:
 		user = dbf.db_select(
@@ -297,47 +333,6 @@ def select_user(bot, update):
 
 	except IndexError:
 		return False
-
-
-# def main():
-#     f = open('token.txt', 'r')
-#     updater = Updater(token=f.readline())
-#     f.close()
-#
-#     # Get the dispatcher to register handlers:
-#     dp = updater.dispatcher
-#
-#     # Add conversation handler with predefined states:
-#     conv_handler = ConversationHandler(
-#         entry_points=[CommandHandler('start', start)],
-#
-#         states={
-#             SET_TASK : [CommandHandler('main_menu', main_menu)],
-#
-#             MAKE_OFFERS: [CommandHandler('make_offers', make_offers)],
-#
-#             CONSULT_OFFERS: [CommandHandler('make_offers', consult_offers)]
-#         },
-#
-#         fallbacks=[CommandHandler('help', help)]
-#     )
-#
-#     dp.add_handler(conv_handler)
-#
-#     # Log all errors:
-#     # dp.add_error_handler(error)
-#     logger = log.set_logging()
-#
-#     # Start DisAtBot:
-#     updater.start_polling()
-#
-#     # Run the bot until the user presses Ctrl-C or the process
-#     # receives SIGINT, SIGTERM or SIGABRT:
-#     updater.idle()
-
-
-# if __name__ == '__main__':
-#     main()
 
 
 conferma_handler = CommandHandler('conferma', conferma)

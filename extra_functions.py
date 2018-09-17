@@ -94,4 +94,3 @@ def update_quotazioni():
 			table='players',
 			columns=['player_status'],
 			values=['FREE'], where='player_status IS NULL')
-	return
