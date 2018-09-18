@@ -1,2 +1,4 @@
 python-telegram-bot==10.1.0
 PyYAML==3.13
+pandas
+nltk==3.3

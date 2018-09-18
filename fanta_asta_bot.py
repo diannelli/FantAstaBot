@@ -55,7 +55,7 @@ def check_offer_format(args):
 	message = 'Formato errato. Es: /offro 5, padoin, cag.'
 
 	if not args:
-		return 'Inserire giocatore e prezzo.'
+		return 'Inserire i dati. Es: /offro 5, padoin, cag.'
 
 	args = ''.join(args).split(',')
 
@@ -81,6 +81,169 @@ def check_offer_format(args):
 			pass
 
 		return offer, pl, team
+
+
+def check_pago_format(args, user):
+
+	message = 'Formato errato. Es: /pago higuain, padoin, khedira, 18.'
+
+	if not args:
+		return 'Inserire i dati. Es: /pago higuain, padoin, khedira, 18.'
+
+	args = ''.join(args).split(',')
+
+	if len(args) < 2:
+		return message
+	else:
+
+		try:
+			int(args[0])
+			return message
+		except ValueError:
+			pass
+
+		rosa = list(all_pl.loc[all_pl['player_status'] == user, 'player_name'])
+
+		offers_user = dbf.db_select(
+				table='offers',
+				columns_in=['offer_player'],
+				where=('offer_user = "{}" AND '.format(user) +
+				       'offer_status = "Not Official"'))
+
+		pls = []
+		money = 0
+
+		for i in args:
+			try:
+				money = int(i)
+			except ValueError:
+				pls.append(i)
+
+		new_pls = []
+		for i, pl in enumerate(pls):
+			if not i:
+				pl2 = ef.jaccard_player(pl, offers_user)
+
+				price = dbf.db_select(
+						table='offers',
+						columns_in=['offer_price'],
+						where='offer_player = "{}"'.format(pl2))[0]
+
+				dbf.db_insert(
+						table='pays',
+						columns=['pay_user', 'pay_player', 'pay_price'],
+						values=[user, pl2, price])
+
+				team, roles = all_pl.loc[all_pl['player_name'] == pl2,
+				['player_team', 'player_roles']].values[0]
+
+				new_pls.append((pl2, price))
+
+			else:
+				pl2 = ef.jaccard_player(pl, rosa)
+				tm, rls, pr = all_pl.loc[all_pl['player_name'] == pl2,
+				                         ['player_team', 'player_roles',
+				                          'player_price']].values[0]
+
+				new_pls.append((pl2, tm, rls, pr))
+
+		message = ('<i>{}</i> ufficializza:\n\n\t\t\t\t\t\t'.format(user) +
+		           '<b>{}</b> <i>({})   {}</i>\n\n'.format(new_pls[0][0], team,
+		                                                 roles) +
+		           'Prezzo: <b>{}</b>.\n\nPagamento:\n'.format(price))
+
+		new_pls = new_pls[1:]
+
+		money_db = ', '.join([el[0] for el in new_pls])
+		if money:
+			money_db += ', {}'.format(money)
+
+		dbf.db_update(
+				table='pays',
+				columns=['pay_money', 'pay_status'],
+				values=[money_db, 'Not Confirmed'],
+				where='pay_user = "{}" AND pay_status IS NULL'.format(user))
+
+		for pl, tm, rl, pr in new_pls:
+			message += '\n\t\t- <b>{}</b> <i>({})   {}</i>   {}'.format(pl, tm,
+			                                                            rl, pr)
+		if money:
+			message += '\n\t\t- <b>{}</b>'.format(money)
+
+		return message + '\n\n/conferma_pagamento'
+
+
+def conferma_pagamento(bot, update):
+
+	user = select_user(update)
+
+	try:
+		pl, pr, mn = dbf.db_select(
+				table='pays',
+				columns_in=['pay_player', 'pay_price', 'pay_money'],
+				where='pay_user = "{}" AND pay_status = "Not Confirmed"'.
+					format(user))[0]
+	except IndexError:
+		return bot.send_message(chat_id=update.message.chat_id,
+		                        text='Nulla da confermare per {}'.format(user))
+
+	budget = dbf.db_select(
+			table='budgets',
+			columns_in=['budget_value'],
+			where='budget_team = "{}"'.format(user))[0]
+
+	mn = mn.split(', ')
+	for i in mn:
+		try:
+			int(i)
+		except ValueError:
+			budget += all_pl.loc[all_pl['player_name'] == i,
+			                     'player_price'].values[0]
+
+	if budget < pr:
+		dbf.db_delete(
+				table='pays',
+				where='pay_user = "{}" AND pay_player = "{}"'.format(user, pl))
+		return bot.send_message(chat_id=update.message.chat_id,
+		                        text='Budget insufficiente'.format(user))
+	else:
+		dbf.db_update(
+				table='budgets',
+				columns=['budget_value'],
+				values=[budget - pr],
+				where='budget_team = "{}"'.format(user))
+
+		dbf.db_update(
+				table='players',
+				columns=['player_status'],
+				values=[user],
+				where='player_name = "{}"'.format(pl))
+
+		dbf.db_update(
+				table='offers',
+				columns=['offer_status'],
+				values=['Official'],
+				where='offer_player = "{}" AND offer_status = "Not Official"'.
+					format(pl))
+
+		dbf.db_update(
+				table='pays',
+				columns=['pay_status'],
+				values=['Confirmed'],
+				where='pay_player = "{}"'.format(pl))
+
+		for i in mn:
+			try:
+				int(i)
+			except ValueError:
+				dbf.db_update(
+						table='players',
+						columns=['player_status'],
+						values=['FREE'],
+						where='player_name = "{}"'.format(i))
+
+	return bot.send_message(chat_id=update.message.chat_id,
+		                    text='Rosa {} aggiornata'.format(user))
 
 
 def check_offer_to_confirm(user):
@@ -198,10 +361,10 @@ def offro(bot, update, args):
 							format(user, offer) +
 							     '<b>{}   ({})   {}</b>'.
 							format(pl, team, roles) +
-							'\n\n/conferma')
+							'\n\n/conferma_offerta')
 
 
-def conferma(bot, update):
+def conferma_offerta(bot, update):
 
 	user = select_user(update)
 	dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -243,16 +406,12 @@ def conferma(bot, update):
 	crea_riepilogo(bot, update, dt)
 
 
-def crea_riepilogo(bot, update, dt_now):
-
-	dt_now = datetime.strptime(dt_now, '%Y-%m-%d %H:%M:%S')
-	message1 = 'Aste APERTE, Tempo Rimanente:\n'
-	message2 = 'Aste CONCLUSE, NON Ufficializzate:\n'
+def aggiorna_offerte_chiuse(dt_now):
 
 	offers_win = dbf.db_select(
 			table='offers',
 			columns_in=['offer_id', 'offer_user', 'offer_player',
-						'offer_price', 'offer_datetime'],
+			            'offer_price', 'offer_datetime'],
 			where='offer_status = "Winning"')
 
 	offers_no = dbf.db_select(
@@ -279,6 +438,18 @@ def crea_riepilogo(bot, update, dt_now):
 	offers_no = [(el[0], el[1], el[2], el[3],
 	              datetime.strptime(el[4], '%Y-%m-%d %H:%M:%S')) for el in
 	             offers_no]
+
+	return offers_win, offers_no
+
+
+def crea_riepilogo(bot, update, dt_now):
+
+	dt_now = datetime.strptime(dt_now, '%Y-%m-%d %H:%M:%S')
+
+	message1 = 'Aste APERTE, Tempo Rimanente:\n'
+	message2 = 'Aste CONCLUSE, NON Ufficializzate:\n'
+
+	offers_win, offers_no = aggiorna_offerte_chiuse(dt_now)
 
 	for _, tm, pl, pr, dt in offers_win:
 		team, roles = dbf.db_select(
@@ -335,12 +506,32 @@ def select_user(update):
 		return False
 
 
-conferma_handler = CommandHandler('conferma', conferma)
+def pago(bot, update, args):
+
+	user = select_user(update)
+
+	dt = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+	dt = datetime.strptime(dt, '%Y-%m-%d %H:%M:%S')
+
+	_, _ = aggiorna_offerte_chiuse(dt)
+
+	message = check_pago_format(args, user)
+
+	return bot.send_message(parse_mode='HTML', chat_id=update.message.chat_id,
+	                        text=message)
+
+
+conferma_offerta_handler = CommandHandler('conferma_offerta', conferma_offerta)
+conferma_pagamento_handler = CommandHandler('conferma_pagamento',
+                                            conferma_pagamento)
 offro_handler = CommandHandler('offro', offro, pass_args=True)
+pago_handler = CommandHandler('pago', pago, pass_args=True)
 riepilogo_handler = CommandHandler('riepilogo', riepilogo)
 
-dispatcher.add_handler(conferma_handler)
+dispatcher.add_handler(conferma_offerta_handler)
+dispatcher.add_handler(conferma_pagamento_handler)
 dispatcher.add_handler(offro_handler)
+dispatcher.add_handler(pago_handler)
 dispatcher.add_handler(riepilogo_handler)
 
 updater.start_polling()
