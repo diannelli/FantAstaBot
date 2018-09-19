@@ -1,0 +1,42 @@
+Questo bot ha 6 comandi che permetteranno di effettuare tutte le operazionixx
+necessarie in sede di mercato.
+
+1) /offro: Utilizzato sia per presentare una nuova offerta sia per rilanciarexx
+un'offerta già esistente. L'offerta DEVE essere presentata nella forma
+
+          offerta, nome, prime 3 lettere della squadra del calciatore
+
+Se ad esempio volessi offrire 20 per Petagna il comando sarebbe:
+
+          /offro 20, petagna, spa
+
+IMPORTANTE: utilizzare la virgola per separare i 3 input e scrivere SOLO lexx
+prime 3 lettere della squadra. Il codice dovrebbe riconoscere il calciatorexx
+anche in caso di piccoli errori nel nome ma ovviamente più il nome chexx
+scrivete è corretto e maggiori saranno le probabilità che il codice loxx
+riconosca.
+
+
+2) /pago: Utilizzato per ufficializzare le aste concluse ed effettuare ilxx
+pagamento. Il comando DEVE avere la forma
+
+          nome, modo di pagamento
+
+Se ad esempio dovessi pagare i 20 di Petagna con Schick + 5 milioni:
+
+          /pago petagna, schick, 5
+
+Vale lo stesso discorso di prima sull'importanza della virgola e sui nomi deixx
+calciatori.
+
+
+3) /conferma_offerta: non ha bisogno di spiegazioni
+
+
+4) /conferma_pagamento: non ha bisogno di spiegazioni
+
+
+5) /riepilogo: mostra le aste in corso e quelle concluse
+
+
+6) /rosa: mostra la rosa aggiornata di colui che invia il comando
