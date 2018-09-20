@@ -1,7 +1,7 @@
-import pandas as pd
-from pandas import ExcelWriter
 import os
+import pandas as pd
 import db_functions as dbf
+from pandas import ExcelWriter
 from nltk.metrics.distance import jaccard_distance
 from nltk.util import ngrams
 
@@ -9,14 +9,15 @@ from nltk.util import ngrams
 def jaccard_player(input_player, all_players):
 
 	"""
-	Find the most similar team in the db in case it is misspelled by the user.
+	Trova il giocatore corrispondente a quello inserito dall'user.
 
 	:param input_player: str
 
 	:param all_players: list of str
 
 
-	:return: str
+	:return jac_player: str
+
 	"""
 
 	dist = 10
@@ -36,7 +37,14 @@ def jaccard_player(input_player, all_players):
 	return jac_player
 
 
-def map_file_asta():
+def correggi_file_asta():
+
+	"""
+	Crea una copia del file originale contenente le rose definite il giorno
+	dell'asta ma con i nomi dei calciatori corretti secondo il formato di
+	Fantagazzetta.
+
+	"""
 
 	asta = pd.read_excel(os.getcwd() + '/Asta2018.xlsx',
 	                     header=0, sheet_name="Foglio1")
@@ -62,7 +70,13 @@ def map_file_asta():
 	writer.close()
 
 
-def update_quotazioni():
+def quotazioni_iniziali():
+
+	"""
+	Dopo averla svuotata, riempie la tabella "players" del db con tutti i dati
+	relativi a ciascun giocatore ad inizio campionato.
+
+	"""
 
 	dbf.empty_table('players')
 
@@ -79,6 +93,16 @@ def update_quotazioni():
 
 	del players
 
+
+def aggiorna_status_calciatori():
+
+	"""
+	Aggiorna lo status di ogni calciatore nella tabella "players" del db.
+	Lo status sarà la fantasquadra proprietaria del giocatore mentre ogni
+	giocatore svincolato avrà status = FREE.
+
+	"""
+
 	asta = pd.read_excel(os.getcwd() + '/Asta2018.xlsx',
 	                     sheet_name="Foglio1-1", usecols=range(0, 24, 3))
 
@@ -94,3 +118,77 @@ def update_quotazioni():
 			table='players',
 			columns=['player_status'],
 			values=['FREE'], where='player_status IS NULL')
+
+
+def aggiorna_db_con_nuove_quotazioni():
+
+	"""
+	Aggiorna tutte le quotazioni dei calciatori prima di ogni mercato.
+	Gestisce anche i trasferimenti interni alla Serie A aggiornando la
+	squadra di appartenenza e l'arrivo di nuovi calciatori.
+
+	"""
+
+	mercati = ['PrimoMercato', 'SecondoMercato', 'TerzoMercato']
+
+	last = ''
+
+	for i in mercati:
+		name = os.getcwd() + '/Quotazioni_' + i + '.xlsx'
+		if os.path.isfile(name):
+			last = name
+
+	players = pd.read_excel(last, sheet_name="Tutti", usecols=[1, 2, 3, 4])
+
+	for x in range(len(players)):
+		role, pl, team, price = players.iloc[x].values
+
+		if pl in players['Nome'].values:
+			dbf.db_update(
+					table='players',
+					columns=['player_team', 'player_price'],
+					values=[team, price],
+					where='player_name = "{}"'.format(pl))
+		else:
+			dbf.db_insert(
+					table='players',
+					columns=['player_name', 'player_team',
+					         'player_roles', 'player_price'],
+					values=[pl, team[:3].upper(), role, price])
+
+	del players
+
+
+# 1) Scaricare le quotazioni di tutti i giocatori dal sito di Fantagazzetta e
+#    salvarle all'interno della cartella del bot con il nome "Quotazioni.xlsx".
+
+
+# 2) Ad asta conclusa, salvare il file con tutte le rose all'interno della
+#    cartella del bot con il nome "Asta2018.xlsx". Aggiornare inoltre il db con
+#    i corretti nomi delle 8 squadre partecipanti ed accertarsi siano uguali a
+#    quelli presenti nel file "Asta2018.xlsx". Aggiornare anche i budgets
+#    post-asta di ciascuna squadra all'interno del db.
+
+
+# 3) Lanciare le funzioni:
+# quotazioni_iniziali()
+# correggi_file_asta()
+
+
+# 4) A questo punto nella cartella ci sarà un nuovo file chiamato
+#    "Asta2018_2.xlsx". Copiare la tabella in esso contenuta ed incollarla in
+#    un secondo Foglio di calcolo appositamente creato nel file originale
+#    "Asta2018.xlsx". Il nuovo Foglio di calcolo dovrà chiamarsi "Foglio1-1".
+
+
+# 5) Lanciare la funzione:
+# aggiorna_status_calciatori()
+
+
+# 6) Prima di ogni mercato, scaricare il nuovo Excel con le quotazioni
+#    aggiornate, salvarlo con il nome relativo al mercato in questione (Esempio
+#    "Quotazioni_PrimoMercato.xlsx") e lanciare la funzione:
+# aggiorna_db_con_nuove_quotazioni()
+
+
+# 7) Utilizzare il bot per il mercato.
