@@ -37,6 +37,37 @@ def jaccard_player(input_player, all_players):
 	return jac_player
 
 
+def jaccard_team(input_team, all_teams):
+
+	"""
+	Trova il giocatore corrispondente a quello inserito dall'user.
+
+	:param input_player: str
+
+	:param all_players: list of str
+
+
+	:return jac_player: str
+
+	"""
+
+	dist = 10
+	tri_guess = set(ngrams(input_team[:3].upper(), 2))
+	jac_team = ''
+
+	for tm in all_teams:
+		p = tm.replace(' ', '')
+		trit = set(ngrams(p, 2))
+		jd = jaccard_distance(tri_guess, trit)
+		if not jd:
+			return tm
+		elif jd < dist:
+			dist = jd
+			jac_team = tm
+
+	return jac_team
+
+
 def correggi_file_asta():
 
 	"""
@@ -147,7 +178,7 @@ def aggiorna_db_con_nuove_quotazioni():
 			dbf.db_update(
 					table='players',
 					columns=['player_team', 'player_price'],
-					values=[team, price],
+					values=[team[:3].upper(), price],
 					where='player_name = "{}"'.format(pl))
 		else:
 			dbf.db_insert(

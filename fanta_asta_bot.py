@@ -9,7 +9,17 @@ updater = Updater(token=f.readline())
 f.close()
 dispatcher = updater.dispatcher
 
-all_pl = dbf.db_select(table='players', dataframe=True)
+
+def aaa(bot, update):
+	user = select_user(update)
+	dbf.db_update(
+			table='offers',
+			columns=['offer_status'],
+			values=['Not Official'],
+			where='offer_user = "{}"'.format(user))
+
+	return bot.send_message(chat_id=update.message.chat_id,
+	                        text='Puoi pagare')
 
 
 def aggiorna_offerte_chiuse(dt_now):
@@ -131,7 +141,10 @@ def check_offer_value(offer_id, player, dt):
 			columns_in=['offer_price'],
 			where='offer_id = {}'.format(offer_id))[0]
 
-	price = all_pl[all_pl['player_name'] == player].iloc[0]['player_price']
+	price = dbf.db_select(
+			table='players',
+			columns_in=['player_price'],
+			where='player_name = "{}"'.format(player))[0]
 
 	try:
 		last_id, last_user, last_offer, last_dt = dbf.db_select(
@@ -217,73 +230,12 @@ def check_pago_format(args, user):
 				where=('offer_user = "{}" AND '.format(user) +
 				       'offer_status = "Not Official"'))
 		if not len(offers_user):
-			return ('24 ore non ancora trascorse o giocatore di proprietà di' +
-			        ' un altro utente')
+			return ('Pagamento non valido. Possibili cause:\n\n' +
+			        '\t\t\t- 24 ore non ancora trascorse;\n' +
+			        '\t\t\t- Giocatore di proprietà di un altro utente;\n' +
+			        '\t\t\t- Offerta inesistente')
 
 		return args, offers_user
-
-
-def message_with_payment(user, user_input, offers_user):
-
-	rosa = list(all_pl.loc[all_pl['player_status'] == user, 'player_name'])
-
-	pls = []
-	money = 0
-
-	for i in user_input:
-		try:
-			money = int(i)
-		except ValueError:
-			pls.append(i)
-
-	new_pls = []
-	for i, pl in enumerate(pls):
-		if not i:
-			pl2 = ef.jaccard_player(pl, offers_user)
-
-			price = dbf.db_select(
-					table='offers',
-					columns_in=['offer_price'],
-					where='offer_player = "{}"'.format(pl2))[-1]
-
-			dbf.db_insert(
-					table='pays',
-					columns=['pay_user', 'pay_player', 'pay_price'],
-					values=[user, pl2, price])
-
-			team, roles = all_pl.loc[all_pl['player_name'] == pl2,
-			                         ['player_team', 'player_roles']].values[0]
-
-			new_pls.append((pl2, price))
-
-		else:
-			pl2 = ef.jaccard_player(pl, rosa)
-			tm, rls, pr = all_pl.loc[all_pl['player_name'] == pl2,
-			                         ['player_team', 'player_roles',
-			                          'player_price']].values[0]
-
-			new_pls.append((pl2, tm, rls, pr))
-
-	message = ('<i>{}</i> ufficializza:\n\n\t\t\t\t\t\t'.format(user) +
-	           '<b>{}</b> <i>({})   {}</i>\n\n'.format(new_pls[0][0], team,
-	                                                   roles) +
-	           'Prezzo: <b>{}</b>.\n\nPagamento:\n'.format(price))
-
-	new_pls = new_pls[1:]
-
-	money_db = ', '.join([el[0] for el in new_pls])
-	if money and len(new_pls):
-		money_db += ', {}'.format(money)
-	elif money:
-		money_db += '{}'.format(money)
-
-	for pl, tm, rl, pr in new_pls:
-		message += '\n\t\t- <b>{}</b> <i>({})   {}</i>   {}'.format(pl, tm,
-		                                                            rl, pr)
-	if money:
-		message += '\n\t\t- <b>{}</b>'.format(money)
-
-	return money_db, message + '\n\n/conferma_pagamento'
 
 
 def conferma_offerta(bot, update):
@@ -301,7 +253,22 @@ def conferma_offerta(bot, update):
 		return bot.send_message(chat_id=update.message.chat_id,
 								text=select_offer_to_confirm(user))
 
-	status = all_pl[all_pl['player_name'] == pl].iloc[0]['player_status']
+	not_off = dbf.db_select(
+			table='offers',
+			columns_in=['offer_player'],
+			where='offer_status = "Not Official"')
+	if pl in not_off:
+		dbf.db_delete(
+				table='offers',
+				where='offer_user = "{}" and offer_player = "{}"'.format(user,
+				                                                         pl))
+		return bot.send_message(chat_id=update.message.chat_id,
+		                        text='Asta già conclusa.')
+
+	status = dbf.db_select(
+					table='players',
+					columns_in=['player_status'],
+					where='player_name = "{}"'.format(pl))[0]
 	if status != 'FREE':
 		dbf.db_delete(table='offers', where='offer_id = {}'.format(of_id))
 		return bot.send_message(chat_id=update.message.chat_id,
@@ -313,7 +280,10 @@ def conferma_offerta(bot, update):
 		return bot.send_message(chat_id=update.message.chat_id,
 								text=last_valid_offer)
 
-	pl_id = all_pl[all_pl['player_name'] == pl].iloc[0]['player_id']
+	pl_id = dbf.db_select(
+					table='players',
+					columns_in=['player_id'],
+					where='player_name = "{}"'.format(pl))[0]
 
 	delete_not_conf_offers_by_others(pl_id, user)
 
@@ -341,11 +311,14 @@ def conferma_pagamento(bot, update):
 	user = select_user(update)
 
 	try:
-		pl, pr, mn = dbf.db_select(
+		pay_id, pl, pr, mn = dbf.db_select(
 				table='pays',
-				columns_in=['pay_player', 'pay_price', 'pay_money'],
+				columns_in=['pay_id', 'pay_player', 'pay_price', 'pay_money'],
 				where='pay_user = "{}" AND pay_status = "Not Confirmed"'.
-					format(user))[0]
+					format(user))[-1]
+		dbf.db_delete(
+				table='pays',
+				where='pay_id != {} AND pay_player = "{}"'.format(pay_id, pl))
 	except IndexError:
 		return bot.send_message(chat_id=update.message.chat_id,
 		                        text='Nulla da confermare per {}'.format(user))
@@ -362,8 +335,10 @@ def conferma_pagamento(bot, update):
 		try:
 			int(i)
 		except ValueError:
-			budget += all_pl.loc[all_pl['player_name'] == i,
-			                     'player_price'].values[0]
+			budget += dbf.db_select(
+					table='players',
+					columns_in=['player_price'],
+					where='player_name = "{}"'.format(i))[0]
 
 	if budget < pr:
 		dbf.db_delete(
@@ -428,6 +403,85 @@ def message_with_offers(list_of_offers, shift, dt_now, msg):
 				' <b>{}h:{}m</b>'.format(int(hh), int(mm)))
 
 	return msg
+
+
+def message_with_payment(user, user_input, offers_user):
+
+	"""
+	Crea il messaggio di riepilogo del pagamento.
+	Utilizzato all'interno della funzione pago().
+
+	:param user: str, nome della fantasquadra
+	:param user_input: list, [giocatore da pagare, metodo di pagamento]
+	:param offers_user: list, tutte le offerte dell'user in stato Not Official
+
+	:return money_db: list, user_input dopo la correzioni dei nomi
+	:return message: str, messaggio di riepilogo
+
+	"""
+
+	rosa = dbf.db_select(
+			table='players',
+			columns_in=['player_name'],
+			where='player_status = "{}"'.format(user))
+
+	pls = []
+	money = 0
+	message = ''
+
+	for i in user_input:
+		try:
+			money = int(i)
+		except ValueError:
+			pls.append(i)
+
+	new_pls = []
+	for i, pl in enumerate(pls):
+		if not i:
+			pl2 = ef.jaccard_player(pl, offers_user)
+
+			price = dbf.db_select(
+					table='offers',
+					columns_in=['offer_price'],
+					where='offer_player = "{}"'.format(pl2))[-1]
+
+			dbf.db_insert(
+					table='pays',
+					columns=['pay_user', 'pay_player', 'pay_price'],
+					values=[user, pl2, price])
+
+			team, roles = dbf.db_select(
+					table='players',
+					columns_in=['player_team', 'player_roles'],
+					where='player_name = "{}"'.format(pl2))[0]
+
+			message = ('<i>{}</i> ufficializza:\n\n\t\t\t\t\t\t'.format(user) +
+			           '<b>{}</b> <i>({})   {}</i>\n\n'.format(pl2, team,
+			                                                   roles) +
+			           'Prezzo: <b>{}</b>.\n\nPagamento:\n'.format(price))
+
+		else:
+			pl2 = ef.jaccard_player(pl, rosa)
+			tm, rls, pr = dbf.db_select(
+					table='players',
+					columns_in=['player_team', 'player_roles', 'player_price'],
+					where='player_name = "{}"'.format(pl2))[0]
+
+			new_pls.append((pl2, tm, rls, pr))
+
+	money_db = ', '.join([el[0] for el in new_pls])
+	if money and len(new_pls):
+		money_db += ', {}'.format(money)
+	elif money:
+		money_db += '{}'.format(money)
+
+	for pl, tm, rl, pr in new_pls:
+		message += '\n\t\t- <b>{}</b> <i>({})   {}</i>   {}'.format(pl, tm,
+		                                                            rl, pr)
+	if money:
+		message += '\n\t\t- <b>{}</b>'.format(money)
+
+	return money_db, message + '\n\n/conferma_pagamento'
 
 
 def crea_riepilogo(bot, update, dt_now):
@@ -510,15 +564,28 @@ def offro(bot, update, args):
 
 	delete_not_conf_offers_by_user(user)
 
-	temp = all_pl[all_pl['player_team'] == team.upper()]['player_name'].values
-	if not len(temp):
+	all_teams = list(set(dbf.db_select(
+					table='players',
+					columns_in=['player_team'])))
+	j_tm = ef.jaccard_team(team, all_teams)
+	j_pl = dbf.db_select(
+					table='players',
+					columns_in=['player_name'],
+					where='player_team = "{}"'.format(j_tm))
+	if not len(j_pl):
 		return bot.send_message(chat_id=update.message.chat_id,
 		                        text='Squadra inesistente')
 
-	pl = ef.jaccard_player(pl, temp)
-	pl_id = all_pl[all_pl['player_name'] == pl].iloc[0]['player_id']
-	team, roles, price = all_pl[all_pl['player_name'] == pl][
-		all_pl.columns[2:-1]].values[0]
+	pl = ef.jaccard_player(pl, j_pl)
+	pl_id = dbf.db_select(
+			table='players',
+			columns_in=['player_id'],
+			where='player_name = "{}"'.format(pl))[0]
+
+	team, roles, price = dbf.db_select(
+			table='players',
+			columns_in=['player_team', 'player_roles', 'player_price'],
+			where='player_name = "{}"'.format(pl))[0]
 
 	dbf.db_insert(
 			table='offers',
@@ -548,7 +615,11 @@ def pago(bot, update, args):
 
 	_, _ = aggiorna_offerte_chiuse(dt)
 
-	args, offers_user = check_pago_format(args, user)
+	try:
+		args, offers_user = check_pago_format(args, user)
+	except ValueError:
+		return bot.send_message(chat_id=update.message.chat_id,
+		                        text=check_pago_format(args, user))
 
 	money_db, message = message_with_payment(user, args, offers_user)
 
@@ -560,6 +631,13 @@ def pago(bot, update, args):
 
 	return bot.send_message(parse_mode='HTML', chat_id=update.message.chat_id,
 	                        text=message)
+
+
+def prezzo(bot, update, args):
+
+	if not args:
+		return bot.send_message(chat=update.message.chat_id,
+		                        text='Inserire giocatore e squadra.')
 
 
 def print_rosa(bot, update):
@@ -661,6 +739,7 @@ def too_late_to_offer(time_now, time_before):
 		return False
 
 
+aaa_handler = CommandHandler('aaa', aaa)
 conferma_offerta_handler = CommandHandler('conferma_offerta', conferma_offerta)
 conferma_pagamento_handler = CommandHandler('conferma_pagamento',
                                             conferma_pagamento)
@@ -670,6 +749,7 @@ info_handler = CommandHandler('info', info)
 riepilogo_handler = CommandHandler('riepilogo', riepilogo)
 rosa_handler = CommandHandler('rosa', print_rosa)
 
+dispatcher.add_handler(aaa_handler)
 dispatcher.add_handler(conferma_offerta_handler)
 dispatcher.add_handler(conferma_pagamento_handler)
 dispatcher.add_handler(offro_handler)
