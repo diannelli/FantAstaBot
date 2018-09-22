@@ -16,7 +16,7 @@ def aaa(bot, update):
 			table='offers',
 			columns=['offer_status'],
 			values=['Not Official'],
-			where='offer_user = "{}"'.format(user))
+			where='offer_user = "{}" AND offer_status = "Winning"'.format(user))
 
 	return bot.send_message(chat_id=update.message.chat_id,
 	                        text='Puoi pagare')
@@ -147,12 +147,19 @@ def check_offer_value(offer_id, player, dt):
 			where='player_name = "{}"'.format(player))[0]
 
 	try:
+		cond1 = 'offer_player = "{}" AND offer_status = "Winning"'.format(
+				player)
+		cond2 = 'offer_player = "{}" AND offer_status = "Not Official"'.format(
+				player)
+
 		last_id, last_user, last_offer, last_dt = dbf.db_select(
 				table='offers',
 				columns_in=['offer_id', 'offer_user',
 				            'offer_price', 'offer_datetime'],
-				where='offer_player = "{}" AND '.format(player) +
-				      'offer_status = "Winning"')[0]
+				where='{} OR {}'.format(cond1, cond2)
+				# where='offer_player = "{}" AND '.format(player) +
+				#       'offer_status = "Winning"'
+		)[0]
 	except IndexError:
 		last_offer = 0
 		last_user = ''
@@ -240,6 +247,17 @@ def check_pago_format(args, user):
 
 def conferma_offerta(bot, update):
 
+	"""
+	Conferma l'offerta effettuata (se valida) ed aggiorna il db di conseguenza.
+	Infine manda un messaggio in chat con tutte le offerte aperte e chiuse.
+
+	:param bot:
+	:param update:
+
+	:return: Nothing
+
+	"""
+
 	# if update.message.chat_id != -318148079:
 	# 	return bot.send_message(chat_id=update.message.chat_id,
 	# 	                        text='Utilizza il gruppo ufficiale')
@@ -253,17 +271,17 @@ def conferma_offerta(bot, update):
 		return bot.send_message(chat_id=update.message.chat_id,
 								text=select_offer_to_confirm(user))
 
-	not_off = dbf.db_select(
-			table='offers',
-			columns_in=['offer_player'],
-			where='offer_status = "Not Official"')
-	if pl in not_off:
-		dbf.db_delete(
-				table='offers',
-				where='offer_user = "{}" and offer_player = "{}"'.format(user,
-				                                                         pl))
-		return bot.send_message(chat_id=update.message.chat_id,
-		                        text='Asta già conclusa.')
+	# not_off = dbf.db_select(
+	# 		table='offers',
+	# 		columns_in=['offer_player'],
+	# 		where='offer_status = "Not Official"')
+	# if pl in not_off:
+	# 	dbf.db_delete(
+	# 			table='offers',
+	# 			where='offer_user = "{}" and offer_player = "{}"'.format(user,
+	# 			                                                         pl))
+	# 	return bot.send_message(chat_id=update.message.chat_id,
+	# 	                        text='Asta già conclusa.')
 
 	status = dbf.db_select(
 					table='players',
@@ -328,8 +346,8 @@ def conferma_pagamento(bot, update):
 			columns_in=['budget_value'],
 			where='budget_team = "{}"'.format(user))[0]
 
-	if len(mn) > 1:
-		mn = mn.split(', ')
+	# if len(mn) > 1:
+	mn = mn.split(', ')
 
 	for i in mn:
 		try:
@@ -338,7 +356,7 @@ def conferma_pagamento(bot, update):
 			budget += dbf.db_select(
 					table='players',
 					columns_in=['player_price'],
-					where='player_name = "{}"'.format(i))[0]
+					where='player_name = "{}"'.format(i.split(' (')[0]))[0]
 
 	if budget < pr:
 		dbf.db_delete(
@@ -380,7 +398,7 @@ def conferma_pagamento(bot, update):
 						table='players',
 						columns=['player_status'],
 						values=['FREE'],
-						where='player_name = "{}"'.format(i))
+						where='player_name = "{}"'.format(i.split(' (')[0]))
 
 	return bot.send_message(chat_id=update.message.chat_id,
 		                    text='Rosa {} aggiornata'.format(user))
@@ -440,15 +458,16 @@ def message_with_payment(user, user_input, offers_user):
 		if not i:
 			pl2 = ef.jaccard_player(pl, offers_user)
 
-			price = dbf.db_select(
+			off_id, price = dbf.db_select(
 					table='offers',
-					columns_in=['offer_price'],
+					columns_in=['offer_id', 'offer_price'],
 					where='offer_player = "{}"'.format(pl2))[-1]
 
 			dbf.db_insert(
 					table='pays',
-					columns=['pay_user', 'pay_player', 'pay_price'],
-					values=[user, pl2, price])
+					columns=['pay_user', 'pay_offer',
+					         'pay_player', 'pay_price'],
+					values=[user, off_id, pl2, price])
 
 			team, roles = dbf.db_select(
 					table='players',
@@ -469,7 +488,8 @@ def message_with_payment(user, user_input, offers_user):
 
 			new_pls.append((pl2, tm, rls, pr))
 
-	money_db = ', '.join([el[0] for el in new_pls])
+	money_db = ', '.join(['{} ({}: {})'.format(el[0], el[1], el[3]) for el in
+	                      new_pls])
 	if money and len(new_pls):
 		money_db += ', {}'.format(money)
 	elif money:
@@ -490,16 +510,18 @@ def crea_riepilogo(bot, update, dt_now):
 
 	message1 = 'Aste APERTE, Tempo Rimanente:\n'
 	message2 = 'Aste CONCLUSE, NON Ufficializzate:\n'
+	message3 = ufficializzazioni()
 
 	offers_win, offers_no = aggiorna_offerte_chiuse(dt_now)
 
 	message1 = message_with_offers(offers_win, 1, dt_now, message1)
 	message2 = message_with_offers(offers_no, 2, dt_now, message2)
 
-	bot.send_message(parse_mode='HTML', chat_id=update.message.chat_id,
-	                 text=message1)
+	# bot.send_message(parse_mode='HTML', chat_id=update.message.chat_id,
+	#                  text=message1)
 	return bot.send_message(parse_mode='HTML', chat_id=update.message.chat_id,
-	                        text=message2)
+	                        text=(message1 + '\n\n\n\n' + message2 +
+	                             '\n\n\n\n' + message3))
 
 
 def delete_not_conf_offers_by_others(player_id, user):
@@ -737,6 +759,35 @@ def too_late_to_offer(time_now, time_before):
 		return True
 	else:
 		return False
+
+
+def ufficializzazioni():
+
+	message = 'Ufficializzazioni:\n'
+
+	ufficiali = dbf.db_select(
+			table='offers',
+			columns_in=['offer_id', 'offer_user',
+			            'offer_player', 'offer_price'],
+			where='offer_status = "Official"')
+
+	for off_id, user, pl, pr in ufficiali:
+
+		tm = dbf.db_select(
+				table='players',
+				columns_in=['player_team'],
+				where='player_name = "{}"'.format(pl))[0]
+
+		pagamento = dbf.db_select(
+				table='pays',
+				columns_in=['pay_money'],
+				where='pay_offer = {}'.format(off_id))[0]
+
+		message += ('\n\t\t\t\t- <i>{}</i> '.format(user) +
+		            'acquista <b>{}</b> ({}) a {}. '.format(pl, tm, pr) +
+		            'Pagamento: <i>{}</i>.'.format(pagamento))
+
+	return message
 
 
 aaa_handler = CommandHandler('aaa', aaa)
